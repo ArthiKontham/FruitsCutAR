@@ -1,0 +1,956 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Fruits Cut AR</title>
+<link rel="icon" href="/thumbnail.png">
+
+<style>
+  /* Palette sampled directly from the reference screenshots. */
+  :root{
+    --bg:#2D2D2D;
+    --fill:#128D89;         /* button fill, small controls */
+    --fill-hi:#0CA7A5;      /* button fill, primary actions */
+    --edge:#23ACA9;         /* 2px button border */
+    --label:#16C9F3;        /* button text */
+    --read:#5FCFEA;         /* score / readouts */
+    --red:#FF0000;          /* game over */
+    --splash:#F0A0A0;       /* thumbnail background */
+    --splash-ink:#0C0705;   /* thumbnail title */
+    --pick:#B4275A;         /* dark pink selection ring */
+    --ui:Arial,Helvetica,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:var(--bg);overflow:hidden;
+    touch-action:none;overscroll-behavior:none;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  #stage{position:fixed;inset:0}
+  #cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  #cam.mirror{transform:scaleX(-1)}
+  #fallback{position:absolute;inset:0;display:none;background:var(--bg)}
+  #fallback.on{display:block}
+  #game{position:absolute;inset:0;width:100%;height:100%}
+  #flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+
+  /* ---------- buttons ---------- */
+  .btn{
+    font-family:var(--ui); font-size:20px; font-weight:700; letter-spacing:.06em;
+    color:var(--label); background:var(--fill);
+    border:2px solid var(--edge); border-radius:2px;
+    padding:8px 26px; min-width:152px; cursor:pointer;
+    transition:background .15s, color .15s;
+  }
+  .btn:hover{ background:var(--fill-hi); color:#EAFBFF }
+  .btn:active{ transform:translateY(1px) }
+  .btn:focus-visible{ outline:2px solid var(--label); outline-offset:3px }
+  .btn.big{ background:var(--fill-hi); font-size:21px; padding:9px 30px; min-width:164px }
+  .btn.big:hover{ background:#14C0BD }
+  .btn[disabled]{ opacity:.4; cursor:default }
+  .btn.sel{ background:var(--fill-hi); color:#EAFBFF }
+
+  /* ---------- HUD ---------- */
+  #hud{position:absolute;inset:0;pointer-events:none;font-family:var(--ui)}
+  #menuBtn{position:absolute;top:16px;left:10px;pointer-events:auto}
+  #camBtn{position:absolute;top:16px;right:12px;pointer-events:auto;min-width:0;
+    padding:8px 18px;font-size:17px}
+  #camBtn.off{background:transparent;color:#9FB6BC;border-color:#57707A}
+  .read{
+    position:absolute; font-family:var(--ui); font-size:30px; font-weight:400;
+    color:var(--read); text-shadow:0 2px 5px rgba(0,0,0,.7);
+    font-variant-numeric:tabular-nums; white-space:nowrap;
+  }
+  #scoreRead{ top:92px; left:14px }
+  #bestRead{ top:92px; right:16px }
+  #timeRead{ top:92px; left:50%; transform:translateX(-50%); display:none }
+  #timeRead.on{ display:block }
+  #timeRead.low{ color:var(--red) }
+
+  #combo{position:absolute;left:50%;top:30%;transform:translate(-50%,-50%) scale(.75);
+    font-family:var(--ui);font-weight:700;font-size:44px;color:var(--label);
+    text-shadow:0 2px 10px rgba(0,0,0,.8);opacity:0;pointer-events:none;text-align:center}
+  #combo small{display:block;font-size:14px;font-weight:700;letter-spacing:.08em;
+    color:var(--read);margin-top:3px}
+  #combo.pop{animation:pop .8s cubic-bezier(.16,1,.3,1) forwards}
+  @keyframes pop{
+    0%{opacity:0;transform:translate(-50%,-50%) scale(.75)}
+    22%{opacity:1;transform:translate(-50%,-50%) scale(1.06)}
+    70%{opacity:1;transform:translate(-50%,-52%) scale(1)}
+    100%{opacity:0;transform:translate(-50%,-60%) scale(1)}}
+
+  /* ---------- panels ----------
+     Pause and game over sit straight over the camera with no scrim,
+     matching the reference. Text carries a shadow so it stays readable
+     against whatever the camera happens to be pointing at. */
+  .panel{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:9px;padding:24px;
+    text-align:center;font-family:var(--ui);color:var(--read)}
+  .panel.hide{display:none}
+  #startPanel{
+    background:var(--splash); gap:12px;
+    --fill:#FFD3DC;        /* baby pink */
+    --fill-hi:#FFE7EC;
+    --edge:#E4879B;
+    --label:#3A1219;
+  }
+  #startPanel .btn:hover, #startPanel .btn.sel{ color:#3A1219 }
+  #startPanel .mode .best{ color:#7A3140; font-size:16px }
+
+  /* Selected / pressed state: a dark pink ring. Drawn with box-shadow rather
+     than a thicker border so nothing shifts by a pixel when it turns on. */
+  #startPanel .btn.sel{
+    background:var(--fill-hi);
+    border-color:var(--pick);
+    box-shadow:0 0 0 3px rgba(180,39,90,.32);
+  }
+  #startPanel .mode:active,
+  #startPanel .mode:focus-visible{
+    border-color:var(--pick);
+    box-shadow:0 0 0 3px rgba(180,39,90,.30);
+    outline:none;
+  }
+
+  /* Bigger type and roomier boxes — the middle column was cramped. */
+  #startPanel .inner{ width:min(560px,84vw); gap:16px }
+  #startPanel .modes{ width:100%; gap:12px }
+  #startPanel .title{ font-size:clamp(34px,7.4vw,60px) }
+  #startPanel .seg .btn{ font-size:23px; padding:12px 40px }
+  #startPanel .mode{ padding:16px 22px }
+  #startPanel .mode strong{ font-size:22px }
+  .splashCol{position:absolute;top:0;bottom:0;width:clamp(62px,14vw,132px);
+    display:flex;flex-direction:column;justify-content:center;align-items:center;
+    overflow:hidden;pointer-events:none;padding:0}
+  .splashCol.l{left:0} .splashCol.r{right:0}
+  /* Negative block margin pulls each sprite up over the one above, so the
+     column reads as one packed strip instead of a spaced-out list.
+     Percentage margins resolve against the column width, so the overlap
+     scales with the screen. */
+  .splashCol img{width:118%;max-width:none;margin:-21% 0;
+    filter:drop-shadow(0 3px 7px rgba(0,0,0,.20))}
+  #startPanel .inner{position:relative;z-index:2;display:flex;flex-direction:column;
+    align-items:center;gap:12px;width:min(360px,72vw)}
+  #startPanel .title{font-family:var(--ui);font-weight:700;color:var(--splash-ink);
+    font-size:clamp(26px,6.2vw,44px);letter-spacing:.01em;text-shadow:none;line-height:1.1}
+  #startPanel .mode .d{color:#5A2A34;font-size:14px;line-height:1.5;margin-top:6px}
+  #startPanel #note{color:#5A3A3A}
+  .title{font-family:var(--ui);font-size:clamp(40px,11vw,68px);font-weight:700;
+    color:var(--label);letter-spacing:.04em;text-shadow:0 2px 12px rgba(0,0,0,.6)}
+  .over{font-family:var(--ui);font-size:clamp(30px,7vw,44px);font-weight:700;
+    color:var(--red);text-shadow:0 2px 10px rgba(0,0,0,.85);margin-bottom:2px}
+  .line{font-size:22px;color:var(--read);text-shadow:0 1px 4px rgba(0,0,0,.8);
+    font-variant-numeric:tabular-nums}
+  #newBest{font-size:13px;font-weight:700;letter-spacing:.14em;color:#EAFBFF;
+    background:var(--fill-hi);border:2px solid var(--edge);padding:3px 12px;
+    border-radius:2px;display:none}
+  #newBest.on{display:inline-block}
+  .stack{display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:6px}
+
+  /* mode picker */
+  .seg{display:inline-flex;gap:8px}
+  .modes{display:flex;flex-direction:column;gap:9px;width:min(330px,100%);margin-top:4px}
+  .mode{display:block;width:100%;text-align:left;cursor:pointer;
+    background:var(--fill);border:2px solid var(--edge);border-radius:2px;
+    padding:10px 14px;font-family:var(--ui);transition:background .15s}
+  .mode:hover{background:var(--fill-hi)}
+  .mode .top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .mode strong{font-size:15px;font-weight:700;letter-spacing:.06em;color:var(--label)}
+  .mode .best{font-size:12px;color:#BFEFFA;font-variant-numeric:tabular-nums}
+  .mode .d{display:block;font-size:11px;line-height:1.45;color:#CFEFF7;margin-top:4px}
+  #note{font-size:12px;color:#7FB8C6;margin-top:4px}
+</style>
+
+<div id="stage">
+  <div id="fallback"></div>
+  <video id="cam" playsinline muted autoplay></video>
+  <canvas id="game"></canvas>
+  <div id="flash"></div>
+
+  <div id="hud">
+    <button class="btn" id="menuBtn">Menu</button>
+    <button class="btn" id="camBtn">Camera: On</button>
+    <div class="read" id="scoreRead">Score: <span id="score">0</span></div>
+    <div class="read" id="bestRead">High Score: <span id="best">0</span></div>
+    <div class="read" id="timeRead">Time: <span id="timer">60</span></div>
+  </div>
+  <div id="combo"></div>
+
+  <!-- START -->
+  <div class="panel" id="startPanel">
+    <div class="splashCol l" id="splashL"></div>
+    <div class="splashCol r" id="splashR"></div>
+    <div class="inner">
+      <div class="title">Fruits Cut AR</div>
+      <div class="seg" id="inputSeg">
+        <button class="btn" data-in="hand" id="segHand" disabled>Hand</button>
+        <button class="btn" data-in="touch" id="segTouch">Touch</button>
+      </div>
+      <div class="modes" id="modeList"></div>
+      <div id="note">Decoding sprites…</div>
+    </div>
+  </div>
+
+  <!-- CAMERA PROBLEM -->
+  <div class="panel hide" id="camPanel" style="background:rgba(45,45,45,.94)">
+    <div class="over" id="camTitle">Camera unavailable</div>
+    <div class="line" id="camDetail" style="font-size:14px;max-width:44ch;line-height:1.6"></div>
+    <div class="stack">
+      <button class="btn big" id="camRetry">Retry camera</button>
+      <button class="btn" id="camSkip">Play without camera</button>
+      <button class="btn" id="camBack">Back</button>
+    </div>
+  </div>
+
+  <!-- PAUSE -->
+  <div class="panel hide" id="pausePanel">
+    <div class="stack">
+      <button class="btn big" id="resumeBtn">Resume</button>
+      <button class="btn big" id="retryBtn">Retry</button>
+      <button class="btn big" id="quitBtn">Quit</button>
+    </div>
+  </div>
+
+  <!-- GAME OVER -->
+  <div class="panel hide" id="overPanel">
+    <div class="over">GAME OVER!</div>
+    <div class="line">Score: <span id="finalScore">0</span></div>
+    <div class="line">Highest Score: <span id="finalBest">0</span></div>
+    <div id="newBest">NEW BEST</div>
+    <div class="stack">
+      <button class="btn big" id="againBtn">Retry</button>
+      <button class="btn" id="menuBtn2">Menu</button>
+    </div>
+    <div id="overReason" style="display:none"></div>
+  </div>
+</div>
+
+<script src="/mediapipe/hands.js"></script>
+<script>
+/* ============================================================
+   SLICE — camera passthrough + 2D canvas overlay.
+   Input   : hand tracking (MediaPipe) or pointer/touch
+   Modes   : classic / arcade / zen
+   ============================================================ */
+
+const FRUITS = [{"name": "apple", "juice": ["#E4635A", "#FFB3AE"], "scale": 0.95}, {"name": "avocado", "juice": ["#D7D300", "#FFFC75"], "scale": 0.95}, {"name": "banana", "juice": ["#E6B93D", "#FFE59C"], "scale": 1.05}, {"name": "banana2", "juice": ["#E6DD26", "#FFFA8F"], "scale": 1.05}, {"name": "berry", "juice": ["#9D000A", "#CB5C62"], "scale": 0.66}, {"name": "blueberry", "juice": ["#1E3B95", "#7185C3"], "scale": 0.6}, {"name": "cherries", "juice": ["#C4303C", "#F6949C"], "scale": 0.7}, {"name": "coconut", "juice": ["#B67E3E", "#E7C196"], "scale": 1.05}, {"name": "dragonfruit", "juice": ["#DF1481", "#FF84C7"], "scale": 1.05}, {"name": "grapes", "juice": ["#6E5594", "#8B78A7"], "scale": 1.0}, {"name": "greenapple", "juice": ["#74B93B", "#BCEA96"], "scale": 0.95}, {"name": "kiwi", "juice": ["#83BA40", "#C6EB9A"], "scale": 0.82}, {"name": "lemon", "juice": ["#E5C729", "#FFED90"], "scale": 0.85}, {"name": "mango", "juice": ["#E69116", "#FFCD86"], "scale": 1.0}, {"name": "melon", "juice": ["#DF9A3A", "#FFD59B"], "scale": 1.2}, {"name": "peach", "juice": ["#E69A69", "#FFD3B6"], "scale": 0.92}, {"name": "pear", "juice": ["#D9BF49", "#FFEFA6"], "scale": 0.95}, {"name": "pineapple", "juice": ["#E39118", "#FFCF87"], "scale": 1.25}, {"name": "pomegranate", "juice": ["#BD2200", "#EF8770"], "scale": 1.0}, {"name": "strawberry", "juice": ["#E64148", "#FF9EA3"], "scale": 0.72}, {"name": "tangerine", "juice": ["#E6810E", "#FFC481"], "scale": 0.8}, {"name": "watermelon", "juice": ["#D8232B", "#FF8A8F"], "scale": 1.35}, {"name": "watermelon2", "juice": ["#C60A10", "#F87C80"], "scale": 1.3}];
+const SPRITE_DATA = {"apple": "/sprites/apple.png", "apple-left": "/sprites/apple-left.png", "apple-right": "/sprites/apple-right.png", "avocado": "/sprites/avocado.png", "avocado-left": "/sprites/avocado-left.png", "avocado-right": "/sprites/avocado-right.png", "banana": "/sprites/banana.png", "banana-left": "/sprites/banana-left.png", "banana-right": "/sprites/banana-right.png", "banana2": "/sprites/banana2.png", "banana2-left": "/sprites/banana2-left.png", "banana2-right": "/sprites/banana2-right.png", "berry": "/sprites/berry.png", "berry-left": "/sprites/berry-left.png", "berry-right": "/sprites/berry-right.png", "blueberry": "/sprites/blueberry.png", "blueberry-left": "/sprites/blueberry-left.png", "blueberry-right": "/sprites/blueberry-right.png", "cherries": "/sprites/cherries.png", "cherries-left": "/sprites/cherries-left.png", "cherries-right": "/sprites/cherries-right.png", "coconut": "/sprites/coconut.png", "coconut-left": "/sprites/coconut-left.png", "coconut-right": "/sprites/coconut-right.png", "dragonfruit": "/sprites/dragonfruit.png", "dragonfruit-left": "/sprites/dragonfruit-left.png", "dragonfruit-right": "/sprites/dragonfruit-right.png", "grapes": "/sprites/grapes.png", "grapes-left": "/sprites/grapes-left.png", "grapes-right": "/sprites/grapes-right.png", "greenapple": "/sprites/greenapple.png", "greenapple-left": "/sprites/greenapple-left.png", "greenapple-right": "/sprites/greenapple-right.png", "kiwi": "/sprites/kiwi.png", "kiwi-left": "/sprites/kiwi-left.png", "kiwi-right": "/sprites/kiwi-right.png", "lemon": "/sprites/lemon.png", "lemon-left": "/sprites/lemon-left.png", "lemon-right": "/sprites/lemon-right.png", "mango": "/sprites/mango.png", "mango-left": "/sprites/mango-left.png", "mango-right": "/sprites/mango-right.png", "melon": "/sprites/melon.png", "melon-left": "/sprites/melon-left.png", "melon-right": "/sprites/melon-right.png", "peach": "/sprites/peach.png", "peach-left": "/sprites/peach-left.png", "peach-right": "/sprites/peach-right.png", "pear": "/sprites/pear.png", "pear-left": "/sprites/pear-left.png", "pear-right": "/sprites/pear-right.png", "pineapple": "/sprites/pineapple.png", "pineapple-left": "/sprites/pineapple-left.png", "pineapple-right": "/sprites/pineapple-right.png", "pomegranate": "/sprites/pomegranate.png", "pomegranate-left": "/sprites/pomegranate-left.png", "pomegranate-right": "/sprites/pomegranate-right.png", "strawberry": "/sprites/strawberry.png", "strawberry-left": "/sprites/strawberry-left.png", "strawberry-right": "/sprites/strawberry-right.png", "tangerine": "/sprites/tangerine.png", "tangerine-left": "/sprites/tangerine-left.png", "tangerine-right": "/sprites/tangerine-right.png", "watermelon": "/sprites/watermelon.png", "watermelon-left": "/sprites/watermelon-left.png", "watermelon-right": "/sprites/watermelon-right.png", "watermelon2": "/sprites/watermelon2.png", "watermelon2-left": "/sprites/watermelon2-left.png", "watermelon2-right": "/sprites/watermelon2-right.png", "bomb": "/sprites/bomb.png", "bomb-blast": "/sprites/bomb-blast.png"};
+
+/* ---------- persistence ---------- */
+/* Wrapped because private-browsing and sandboxed frames can throw on
+   localStorage access. A failure here must never break the game. */
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v==null ? d : JSON.parse(v); }
+             catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+};
+const BEST_KEY = 'slice.best.v2';
+let best = Object.assign({classic:0, arcade:0, zen:0}, store.get(BEST_KEY, {}));
+
+/* ---------- modes ---------- */
+const MODES = {
+  classic:{ label:'Classic', time:0, bombs:true,
+    desc:'Endless. +2 a fruit, −2 a bomb. Let the score fall below zero and it is over.' },
+  arcade:{ label:'Arcade', time:60, bombs:true,
+    desc:'Sixty seconds, dense waves, double points on fruit. Bombs still cost 2. Below zero ends it.' },
+  zen:{ label:'Zen', time:90, bombs:false,
+    desc:'Ninety seconds. No bombs, nothing to lose. Just fruit.' },
+};
+
+const IMG = {};
+function decodeAll(onProgress){
+  const keys = Object.keys(SPRITE_DATA);
+  let done = 0;
+  return Promise.all(keys.map(k => new Promise(res => {
+    const im = new Image();
+    im.onload = im.onerror = () => { IMG[k] = im.naturalWidth ? im : null; onProgress(++done, keys.length); res(); };
+    im.src = SPRITE_DATA[k];
+  })));
+}
+
+/* ---------- canvas ---------- */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR = Math.min(devicePixelRatio||1, 2.5);
+  W = innerWidth; H = innerHeight;
+  canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', resize);
+addEventListener('orientationchange', ()=>setTimeout(resize,250));
+resize();
+
+/* ---------- camera ---------- */
+const video = document.getElementById('cam');
+const fallbackBg = document.getElementById('fallback');
+let MIRROR = false, camReady = false;
+let camWanted = true;      // the user's toggle position
+let camSuspended = false;  // stopped by us because the tab went away
+
+/* Hand tracking needs the front camera; a rear camera only makes sense on an
+   actual touch device. A laptop has no rear camera to ask for. */
+const preferredFacing = () =>
+  (state.input === 'touch' && matchMedia('(pointer: coarse)').matches) ? 'environment' : 'user';
+
+/* Release the hardware properly. Merely hiding the <video> leaves the camera
+   light on and the device locked to this tab. */
+function stopCamera(){
+  if(video.srcObject){
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+  camReady = false;
+  useFallback();
+}
+
+async function setCamera(on){
+  camWanted = on;
+  camSuspended = false;
+  if(on){
+    const ok = await startCamera(preferredFacing());
+    if(!ok){
+      camWanted = false;
+      $('camTitle').textContent = camError ? camError.t : 'Camera unavailable';
+      $('camDetail').textContent = camError ? camError.d : '';
+      showPanel('camPanel');
+    }
+  } else {
+    stopCamera();
+  }
+  updateCamBtn();
+}
+function updateCamBtn(){
+  const b = $('camBtn');
+  b.textContent = camWanted ? 'Camera: On' : 'Camera: Off';
+  b.classList.toggle('off', !camWanted);
+}
+
+let camError = null;
+
+/* The overwhelmingly common cause of a dead camera is not a denied
+   permission but an insecure origin: on file:// and plain http://
+   navigator.mediaDevices is simply undefined, so the call throws a
+   TypeError that looks nothing like a camera problem. Check first. */
+function cameraBlocker(){
+  if(!window.isSecureContext) return {
+    t:'Not a secure context',
+    d:`This page is open at ${location.protocol}//${location.host||'(local file)'} . Browsers only release the camera on https:// or localhost. Start the bundled server and open https://localhost:8791/ instead of opening index.html directly.` };
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return {
+    t:'Camera API unavailable',
+    d:'navigator.mediaDevices is missing. Usually an insecure origin, an old browser, or an iframe without camera permission. Open the page directly rather than embedded.' };
+  if(window.self !== window.top) return {
+    t:'Running inside a frame',
+    d:'Embedded frames need an explicit camera allowance. Open index.html in its own tab.' };
+  return null;
+}
+function describeCamError(e){
+  const n = e && e.name || 'Error';
+  const map = {
+    NotAllowedError:['Permission denied','You (or the browser) blocked camera access. Click the camera icon in the address bar, allow it, then retry. On a self-signed https address you must accept the certificate warning first.'],
+    NotFoundError:['No camera found','No video input device is connected.'],
+    NotReadableError:['Camera already in use','Another app has the camera open — Zoom, Meet, Teams, or another browser tab. Close it and retry.'],
+    OverconstrainedError:['Camera cannot match request','The requested resolution or facing mode is unsupported.'],
+    SecurityError:['Blocked by browser policy','Camera access was refused for this origin.'],
+    AbortError:['Camera start aborted','The device stopped responding. Retry.'],
+  };
+  const [t,d] = map[n] || [n, e && e.message || 'Unknown error.'];
+  return { t, d };
+}
+
+async function startCamera(facing){
+  camError = cameraBlocker();
+  if(camError) return false;
+
+  if (camReady && video.srcObject){
+    const cur = video.srcObject.getVideoTracks()[0]?.getSettings?.().facingMode;
+    if ((cur||'user') === facing) return true;
+    video.srcObject.getTracks().forEach(t=>t.stop());   // switching front/rear
+  }
+
+  let stream = null;
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ideal:facing}, width:{ideal:1280}, height:{ideal:720} }, audio:false });
+  }catch(e){
+    // A denied permission will not improve on a retry; anything else might,
+    // so try again with every constraint dropped.
+    if(e.name === 'NotAllowedError'){ camError = describeCamError(e); return false; }
+    try{ stream = await navigator.mediaDevices.getUserMedia({video:true}); }
+    catch(e2){ camError = describeCamError(e2); return false; }
+  }
+
+  try{
+    video.srcObject = stream;
+    await video.play();
+  }catch(e){ camError = describeCamError(e); return false; }
+
+  const actual = stream.getVideoTracks()[0]?.getSettings?.().facingMode;
+  MIRROR = (actual || 'user') !== 'environment';
+  video.classList.toggle('mirror', MIRROR);
+  video.style.display=''; fallbackBg.classList.remove('on');
+  camReady = true; camError = null;
+  return true;
+}
+function useFallback(){ video.style.display='none'; fallbackBg.classList.add('on'); }
+
+/* Landmarks are normalised to the video frame, but the video is painted with
+   object-fit:cover — scaled up and cropped. Undo that or the blade drifts. */
+function videoToScreen(nx, ny){
+  const vw=video.videoWidth, vh=video.videoHeight;
+  if(!vw||!vh) return null;
+  const s = Math.max(W/vw, H/vh), dw=vw*s, dh=vh*s;
+  const ox=(W-dw)/2, oy=(H-dh)/2;
+  return { x: ox + (MIRROR ? 1-nx : nx)*dw, y: oy + ny*dh };
+}
+
+/* ---------- tuning ---------- */
+const GRAVITY=1500;
+const BASE_R = 0.100;   // hitbox radius as a fraction of min(width,height)
+/* sprite() draws at 2*r*FILL wide, so FILL is measured against the hitbox
+   DIAMETER, not the radius. 1.18 leaves a little margin for the ~6%
+   transparent padding baked into each sprite. Raising this makes fruit
+   look bigger without changing how big it is to cut. */
+const FILL = 1.18;
+const HIT = 1.0;        // collision radius as a fraction of r
+const BLADE_LIFE=0.22, HAND_SMOOTH=0.45;
+const FRUIT_POINTS  = 2;   // every fruit sliced
+const BOMB_PENALTY  = 2;   // every bomb sliced
+/* No lives. The score is the health bar: drop below zero and the run ends. */
+
+const state = {
+  phase:'menu',          // menu | playing | paused | over
+  mode:'classic', input:'touch',
+  score:0, timeLeft:0,
+  sliced:0, spawned:0, missed:0,
+  combo:0, bestCombo:0, comboTimer:0, bestStroke:0,
+  nextWave:0, shake:0,
+};
+let objects=[], halves=[], bits=[], splats=[], blasts=[];
+const cfg = () => MODES[state.mode];
+
+/* ---------- blades ---------- */
+class Blade{
+  constructor(){ this.points=[]; this.tip=null; this.seen=0; this.stroke=0; }
+  push(x,y){
+    this.points.push({x,y,t:performance.now()/1000});
+    if(this.points.length>26) this.points.shift();
+    this.tip={x,y}; this.seen=performance.now()/1000;
+  }
+  clear(){ this.points.length=0; this.tip=null; this.stroke=0; }
+  live(){ return performance.now()/1000 - this.seen < 0.35; }
+}
+const blades = { pointer:new Blade(), hand0:new Blade(), hand1:new Blade() };
+let pointerDown = false;
+const playing = () => state.phase === 'playing';
+
+function segHitsCircle(ax,ay,bx,by,cx,cy,r){
+  const dx=bx-ax, dy=by-ay, l2=dx*dx+dy*dy;
+  let t = l2 ? ((cx-ax)*dx+(cy-ay)*dy)/l2 : 0;
+  t = Math.max(0,Math.min(1,t));
+  const px=ax+t*dx, py=ay+t*dy, ex=cx-px, ey=cy-py;
+  return ex*ex+ey*ey <= r*r;
+}
+function checkSlices(blade, minSpeed){
+  if(!playing()) return;
+  const p = blade.points;
+  if(p.length<2) return;
+  const a=p[p.length-2], b=p[p.length-1];
+  const dx=b.x-a.x, dy=b.y-a.y;
+  // Below the threshold the blade counts as lifted: no cut, and the
+  // single-stroke chain ends. Without this a hand that simply stays on
+  // screen would keep one stroke alive for the whole run.
+  if(Math.hypot(dx,dy) < minSpeed){ blade.stroke = 0; return; }
+  const cut = Math.atan2(dy,dx);
+  for(const o of objects){
+    if(o.dead) continue;
+    if(!segHitsCircle(a.x,a.y,b.x,b.y,o.x,o.y,o.r*HIT)) continue;
+    o.dead = true;
+    if(o.type==='bomb'){ detonate(o); return; }
+    sliceFruit(o, cut, blade);
+  }
+}
+
+canvas.addEventListener('pointerdown', e=>{
+  if(!playing()) return;
+  pointerDown=true; blades.pointer.clear();
+  blades.pointer.push(e.clientX,e.clientY);
+});
+canvas.addEventListener('pointermove', e=>{
+  if(!playing()||!pointerDown) return;
+  e.preventDefault();
+  blades.pointer.push(e.clientX,e.clientY);
+  checkSlices(blades.pointer, 6);
+},{passive:false});
+addEventListener('pointerup', ()=>{ pointerDown=false; blades.pointer.stroke=0; });
+addEventListener('pointercancel', ()=>{ pointerDown=false; blades.pointer.stroke=0; });
+
+/* ---------- hand tracking ---------- */
+let hands=null, handsReady=false, handsBusy=false;
+
+async function initHands(){
+  if(typeof Hands==='undefined') throw new Error('hands.js did not load');
+  hands = new Hands({ locateFile: f=>`/mediapipe/${f}` });
+  hands.setOptions({ maxNumHands:2, modelComplexity:0,
+    minDetectionConfidence:0.6, minTrackingConfidence:0.5 });
+  hands.onResults(onHands);
+  await hands.initialize();
+  handsReady = true;
+}
+function onHands(res){
+  const list = res.multiHandLandmarks || [];
+  for(let i=0;i<2;i++){
+    const blade = blades['hand'+i], lm = list[i];
+    if(!lm){ if(!blade.live()) blade.clear(); continue; }
+    const tip = videoToScreen(lm[8].x, lm[8].y);   // 8 = index fingertip
+    if(!tip) continue;
+    const prev = blade.tip;
+    const x = prev ? prev.x + (tip.x-prev.x)*(1-HAND_SMOOTH) : tip.x;
+    const y = prev ? prev.y + (tip.y-prev.y)*(1-HAND_SMOOTH) : tip.y;
+    blade.push(x,y);
+    checkSlices(blade, 9);
+  }
+}
+async function pumpHands(){
+  if(!handsReady || handsBusy || state.input!=='hand') return;
+  if(state.phase==='paused' || video.readyState<2) return;
+  handsBusy = true;
+  try{ await hands.send({image:video}); }catch(e){}
+  handsBusy = false;
+}
+
+/* ---------- spawning ---------- */
+function bombChance(){
+  const m = cfg();
+  if(!m.bombs) return 0;
+  if(state.mode==='arcade') return 0.14;
+  return Math.min(0.05 + state.score*0.0012, 0.19);
+}
+function waveGap(){
+  if(state.mode==='arcade') return Math.max(0.34, 0.72 - state.score*0.0025);
+  if(state.mode==='zen')    return 0.72;
+  return Math.max(0.62, 1.55 - state.score*0.006);
+}
+function waveSize(){
+  const r = Math.random();
+  if(state.mode==='arcade') return r>0.55 ? 4 : (r>0.25 ? 3 : 2);
+  if(state.mode==='zen')    return r>0.6 ? 3 : 2;
+  if(state.score>60 && r>0.78) return 4;
+  if(r>0.62) return 3;
+  if(r>0.28) return 2;
+  return 1;
+}
+function spawnOne(){
+  const isBomb = Math.random() < bombChance();
+  const margin = W*0.12;
+  const x = margin + Math.random()*(W-margin*2);
+  const vy = -Math.sqrt(2*GRAVITY*H*(0.55+Math.random()*0.28));
+  const vx = ((W/2-x)/(W/2))*(60+Math.random()*130) + (Math.random()-0.5)*70;
+  const unit = Math.min(W,H)*BASE_R;
+  const base = { x, y:H+90, vx, vy, rot:Math.random()*Math.PI*2,
+    spin:(Math.random()-0.5)*3.2, dead:false, counted:false };
+  if(isBomb) objects.push({...base, type:'bomb', r:unit*0.92});
+  else{
+    const def = FRUITS[Math.floor(Math.random()*FRUITS.length)];
+    objects.push({...base, type:'fruit', def, r:unit*def.scale});
+  }
+  state.spawned++;
+}
+function scheduleWave(){
+  const n = waveSize();
+  for(let i=0;i<n;i++)
+    setTimeout(()=>{ if(playing()) spawnOne(); }, i*(90+Math.random()*160));
+  state.nextWave = waveGap();
+}
+
+/* ---------- slicing + juice ---------- */
+function sliceFruit(o, cut, blade){
+  state.sliced++;
+  state.combo++; state.comboTimer = 0.55;
+  state.bestCombo = Math.max(state.bestCombo, state.combo);
+
+  // fruit cut without lifting the blade — the move worth chasing
+  blade.stroke++;
+  state.bestStroke = Math.max(state.bestStroke, blade.stroke);
+
+  let gain = FRUIT_POINTS;
+  if(blade.stroke >= 2) gain += blade.stroke;          // multi-slice bonus
+  else if(state.combo >= 3) gain += state.combo;       // rapid consecutive
+  if(state.mode === 'arcade') gain *= 2;
+  state.score += gain;
+
+  if(blade.stroke >= 3) showCombo(blade.stroke, 'in one stroke');
+  else if(state.combo >= 4) showCombo(state.combo, 'combo');
+  updateHUD();
+
+  const nx=-Math.sin(cut), ny=Math.cos(cut);
+  const push = 145+Math.random()*70, rest = cut - Math.PI/2;
+  for(const side of ['left','right']){
+    const d = side==='left'?1:-1;
+    halves.push({ x:o.x, y:o.y,
+      vx:o.vx*0.85+nx*push*d, vy:o.vy*0.85+ny*push*d,
+      rot:rest, spin:d*(0.9+Math.random()*1.1), r:o.r,
+      key:`${o.def.name}-${side}`, life:1 });
+  }
+  juice(o.x,o.y,o.def.juice,cut,o.r);
+}
+
+/* mist, streaks perpendicular to the blade, then falling droplets */
+function juice(x,y,colors,cut,r){
+  const nx=-Math.sin(cut), ny=Math.cos(cut);
+  splats.push({x,y,r:r*0.45,max:r*2.1,life:1,color:colors[1]});
+  for(const d of [1,-1]){
+    for(let i=0;i<11;i++){
+      const a = Math.atan2(ny*d,nx*d) + (Math.random()-0.5)*1.15;
+      const sp = 230+Math.random()*430;
+      bits.push({kind:'streak',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+        r:(2.2+Math.random()*4.2)*(r/44),
+        color:Math.random()>.5?colors[0]:colors[1],
+        life:1, decay:1.5+Math.random()*0.9});
+    }
+  }
+  for(let i=0;i<22;i++){
+    const a=Math.random()*Math.PI*2, sp=60+Math.random()*270;
+    bits.push({kind:'drop',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-60,
+      r:(2.5+Math.random()*7)*(r/44),
+      color:Math.random()>.45?colors[0]:colors[1],
+      life:1, decay:1.05+Math.random()*0.7});
+  }
+}
+
+function detonate(o){
+  blasts.push({x:o.x,y:o.y,r:o.r,life:1});
+  state.shake=1; flash();
+  state.combo=0;
+  for(const k in blades) blades[k].stroke=0;
+  state.score -= BOMB_PENALTY;
+  showCombo('−'+BOMB_PENALTY, 'bomb');
+  updateHUD();
+  if(state.score < 0) endGame('Score below zero');
+}
+
+/* ---------- update ---------- */
+function update(dt){
+  if(state.shake>0) state.shake=Math.max(0,state.shake-dt*3.2);
+
+  if(playing()){
+    if(cfg().time){
+      state.timeLeft -= dt;
+      if(state.timeLeft<=0){ state.timeLeft=0; updateTimer(); updateHUD(); endGame('Time up'); }
+      else updateTimer();
+    }
+    state.nextWave -= dt;
+    if(state.nextWave<=0) scheduleWave();
+    if(state.comboTimer>0 && (state.comboTimer-=dt)<=0) state.combo=0;
+  }
+
+  for(const o of objects){
+    o.vy+=GRAVITY*dt; o.x+=o.vx*dt; o.y+=o.vy*dt; o.rot+=o.spin*dt;
+    if(!o.dead && !o.counted && o.y-o.r>H+60){
+      o.counted=true;
+      if(o.type==='fruit' && playing()){ state.missed++; state.combo=0; }
+    }
+  }
+  objects = objects.filter(o=>!o.dead && o.y-o.r<H+140);
+
+  for(const h of halves){
+    h.vy+=GRAVITY*dt; h.x+=h.vx*dt; h.y+=h.vy*dt; h.rot+=h.spin*dt;
+    if(h.y-h.r>H+80) h.life=0;
+  }
+  halves = halves.filter(h=>h.life>0);
+
+  for(const b of bits){
+    b.vy += GRAVITY*(b.kind==='streak'?0.45:0.72)*dt;
+    b.vx *= (1-0.9*dt);
+    b.x+=b.vx*dt; b.y+=b.vy*dt; b.life-=dt*b.decay;
+  }
+  bits = bits.filter(b=>b.life>0 && b.y<H+60);
+
+  for(const s of splats){ s.life-=dt*3.4; s.r += (s.max-s.r)*dt*9; }
+  splats = splats.filter(s=>s.life>0);
+
+  for(const b of blasts) b.life-=dt*1.15;
+  blasts = blasts.filter(b=>b.life>0);
+}
+
+/* ---------- render ---------- */
+function sprite(key,x,y,rot,r,alpha){
+  const im=IMG[key]; if(!im) return;
+  const s=r*FILL;
+  ctx.save();
+  if(alpha!==undefined) ctx.globalAlpha=alpha;
+  ctx.translate(x,y); ctx.rotate(rot);
+  ctx.drawImage(im,-s,-s,s*2,s*2);
+  ctx.restore();
+}
+function drawJuice(){
+  for(const s of splats){
+    const g=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,s.r);
+    g.addColorStop(0,s.color+'CC'); g.addColorStop(0.55,s.color+'55'); g.addColorStop(1,s.color+'00');
+    ctx.globalAlpha=Math.max(0,s.life)*0.75; ctx.fillStyle=g;
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+  }
+  ctx.lineCap='round';
+  for(const b of bits){
+    const a=Math.max(0,Math.min(1,b.life));
+    ctx.globalAlpha=a;
+    if(b.kind==='streak'){
+      const sp=Math.hypot(b.vx,b.vy)||1;
+      const len=Math.min(34,sp*0.045);
+      ctx.strokeStyle=b.color; ctx.lineWidth=b.r*2*a;
+      ctx.beginPath(); ctx.moveTo(b.x,b.y);
+      ctx.lineTo(b.x-(b.vx/sp)*len, b.y-(b.vy/sp)*len); ctx.stroke();
+    }else{
+      ctx.fillStyle=b.color;
+      ctx.beginPath(); ctx.arc(b.x,b.y,b.r*a,0,Math.PI*2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha=1;
+}
+function drawBladeTrail(blade){
+  const now=performance.now()/1000;
+  const p=blade.points.filter(q=>now-q.t<BLADE_LIFE);
+  if(p.length<2) return;
+  ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.shadowColor='rgba(22,201,243,.9)'; ctx.shadowBlur=18;
+  for(let pass=0;pass<2;pass++){
+    for(let i=1;i<p.length;i++){
+      const age=(now-p[i].t)/BLADE_LIFE, taper=(i/p.length)*(1-age);
+      ctx.strokeStyle = pass===0?`rgba(22,201,243,${0.6*(1-age)})`
+                                :`rgba(255,255,255,${0.95*(1-age)})`;
+      ctx.lineWidth=(pass===0?17:6)*Math.max(0.05,taper);
+      ctx.beginPath(); ctx.moveTo(p[i-1].x,p[i-1].y); ctx.lineTo(p[i].x,p[i].y); ctx.stroke();
+    }
+    ctx.shadowBlur=0;
+  }
+  ctx.restore();
+}
+function drawTip(blade){
+  if(!blade.tip || !blade.live()) return;
+  const {x,y}=blade.tip;
+  const pulse=1+Math.sin(performance.now()/190)*0.13, R=34*pulse;
+  ctx.save(); ctx.globalCompositeOperation='lighter';
+  const g=ctx.createRadialGradient(x,y,0,x,y,R);
+  g.addColorStop(0,'rgba(255,255,255,.95)');
+  g.addColorStop(0.18,'rgba(150,236,255,.78)');
+  g.addColorStop(0.45,'rgba(22,201,243,.36)');
+  g.addColorStop(1,'rgba(22,201,243,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,R,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(x,y,7.5*pulse,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+function render(){
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  if(state.shake>0){
+    const m=state.shake*16;
+    ctx.translate((Math.random()-.5)*m,(Math.random()-.5)*m);
+  }
+  drawJuice();
+  for(const h of halves) sprite(h.key,h.x,h.y,h.rot,h.r,Math.min(1,h.life));
+  for(const o of objects) sprite(o.type==='bomb'?'bomb':o.def.name,o.x,o.y,o.rot,o.r);
+  for(const b of blasts){
+    const t=1-b.life;
+    sprite('bomb-blast',b.x,b.y,0,b.r*(2.9+t*4.7),Math.max(0,b.life));
+  }
+  ctx.globalAlpha=1;
+  for(const k in blades){
+    drawBladeTrail(blades[k]);
+    if(k!=='pointer') drawTip(blades[k]);
+  }
+  ctx.restore();
+}
+
+/* ---------- loop ---------- */
+let last=performance.now();
+(function loop(now){
+  const dt=Math.min((now-last)/1000,0.05);
+  last=now;
+  pumpHands();
+  if(state.phase!=='paused') update(dt);
+  render();
+  requestAnimationFrame(loop);
+})(last);
+
+/* ---------- HUD ---------- */
+const $=id=>document.getElementById(id);
+const comboEl=$('combo'), flashEl=$('flash');
+
+function updateHUD(){
+  $('score').textContent = state.score;
+  $('best').textContent  = best[state.mode] || 0;
+}
+function updateTimer(){
+  const t = Math.ceil(state.timeLeft);
+  $('timer').textContent = t;
+  $('timeRead').classList.toggle('low', t<=10);
+}
+function showCombo(n,label){
+  comboEl.innerHTML = `${n}${typeof n==='number'?'×':''}<small>${label}</small>`;
+  comboEl.classList.remove('pop'); void comboEl.offsetWidth; comboEl.classList.add('pop');
+}
+function flash(){
+  flashEl.style.transition='none'; flashEl.style.opacity='.85';
+  requestAnimationFrame(()=>{ flashEl.style.transition='opacity .45s ease-out'; flashEl.style.opacity='0'; });
+}
+
+/* ---------- flow ---------- */
+function showPanel(which){
+  for(const id of ['startPanel','pausePanel','overPanel','camPanel'])
+    $(id).classList.toggle('hide', id!==which);
+}
+
+function startRun(mode){
+  state.mode = mode;
+  const m = cfg();
+  objects=[];halves=[];bits=[];splats=[];blasts=[];
+  for(const k in blades) blades[k].clear();
+  Object.assign(state,{ phase:'playing', score:0, timeLeft:m.time,
+    sliced:0, spawned:0, missed:0, combo:0, bestCombo:0, comboTimer:0,
+    bestStroke:0, nextWave:0.5, shake:0 });
+  $('timeRead').classList.toggle('on', m.time>0);
+  updateHUD(); if(m.time) updateTimer();
+  showPanel(null);
+}
+
+function pause(){
+  if(!playing()) return;
+  state.phase='paused'; pointerDown=false;
+  showPanel('pausePanel');
+}
+function resume(){
+  if(state.phase!=='paused') return;
+  state.phase='playing';
+  last = performance.now();          // do not integrate the paused seconds
+  for(const k in blades) blades[k].clear();
+  showPanel(null);
+}
+function toMenu(){
+  state.phase='menu';
+  objects=[];halves=[];bits=[];splats=[];blasts=[];
+  $('timeRead').classList.remove('on');
+  renderModeList();
+  showPanel('startPanel');
+}
+
+function endGame(reason){
+  if(state.phase==='over') return;
+  state.phase='over'; pointerDown=false;
+
+  const isBest = state.score > (best[state.mode]||0);
+  if(isBest){ best[state.mode]=state.score; store.set(BEST_KEY,best); updateHUD(); }
+
+  setTimeout(()=>{
+    $('overReason').textContent = reason;
+    $('finalScore').textContent = state.score;
+    $('finalBest').textContent  = best[state.mode] || 0;
+    $('newBest').classList.toggle('on', isBest && state.score>0);
+    showPanel('overPanel');
+  }, 900);
+}
+
+/* ---------- menu ---------- */
+function renderModeList(){
+  const list = $('modeList');
+  list.innerHTML='';
+  for(const key in MODES){
+    const m = MODES[key];
+    const b = document.createElement('button');
+    b.className='mode'; b.dataset.m=key;
+    b.innerHTML = `<span class="top"><strong>${m.label}</strong>
+      <span class="best">High Score: ${best[key]||0}</span></span>
+      <span class="d">${m.desc}</span>`;
+    b.addEventListener('click', ()=>chooseMode(key));
+    list.appendChild(b);
+  }
+}
+let pendingMode = null;
+async function chooseMode(key){
+  pendingMode = key;
+  const ok = await startCamera(preferredFacing());
+  if(!ok){
+    $('camTitle').textContent = camError ? camError.t : 'Camera unavailable';
+    $('camDetail').textContent = camError ? camError.d : '';
+    showPanel('camPanel');
+    return;
+  }
+  startRun(key);
+}
+$('camRetry').addEventListener('click', ()=>chooseMode(pendingMode));
+$('camSkip').addEventListener('click', ()=>{
+  useFallback();
+  camWanted = false; updateCamBtn();
+  startRun(pendingMode);
+});
+$('camBack').addEventListener('click', toMenu);
+function setInput(v){
+  state.input = v;
+  $('segHand').classList.toggle('sel', v==='hand');
+  $('segTouch').classList.toggle('sel', v==='touch');
+}
+$('segHand').addEventListener('click', ()=>setInput('hand'));
+$('segTouch').addEventListener('click', ()=>setInput('touch'));
+
+$('menuBtn').addEventListener('click', ()=> playing() ? pause() : toMenu());
+$('resumeBtn').addEventListener('click', resume);
+$('retryBtn').addEventListener('click', ()=>{ showPanel(null); startRun(state.mode); });
+$('quitBtn').addEventListener('click', toMenu);
+$('againBtn').addEventListener('click', ()=>startRun(state.mode));
+$('menuBtn2').addEventListener('click', toMenu);
+
+addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ playing() ? pause() : resume(); }
+  if(e.key===' ' && state.phase==='over'){ e.preventDefault(); startRun(state.mode); }
+});
+// Losing focus mid-run should not cost you the run.
+addEventListener('blur', pause);
+
+/* Leaving the tab releases the camera outright — the indicator light goes
+   out and other apps can use it again. It comes back when you return,
+   unless you had switched it off yourself. Permission is already granted
+   at that point, so there is no second prompt. */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){
+    pause();
+    if(camReady){ camSuspended = true; stopCamera(); }
+  } else if(camSuspended && camWanted){
+    camSuspended = false;
+    startCamera(preferredFacing());
+  }
+});
+// closing or navigating away
+addEventListener('pagehide', stopCamera);
+
+$('camBtn').addEventListener('click', ()=>setCamera(!camWanted));
+
+/* ---------- boot ---------- */
+/* The thumbnail is 184x130, far too small to stretch behind a full screen,
+   so the splash is rebuilt at native resolution from the sprite set. */
+function buildSplash(){
+  const picks = ['watermelon2','strawberry','lemon','kiwi','tangerine','pear',
+                 'apple','mango','blueberry','cherries','pineapple','avocado',
+                 'dragonfruit','banana','greenapple','grapes','peach','berry',
+                 'melon','coconut','pomegranate','banana2'];
+  const half = Math.ceil(picks.length/2);
+  [['splashL', picks.slice(0,half)], ['splashR', picks.slice(half)]].forEach(([id,list])=>{
+    const el = $(id); el.innerHTML='';
+    list.forEach(n=>{
+      if(!SPRITE_DATA[n]) return;
+      const img = document.createElement('img');
+      img.src = SPRITE_DATA[n]; img.alt='';
+      el.appendChild(img);
+    });
+  });
+}
+buildSplash();
+renderModeList();
+setInput(state.input);   // mark the default so the ring is visible from the start
+decodeAll((d,t)=>{ $('note').textContent=`Decoding sprites ${d}/${t}`; })
+  .then(()=>{ $('note').textContent='Loading hand model…'; return initHands(); })
+  .then(()=>{
+    $('segHand').disabled=false;
+    $('note').style.display='none';
+  })
+  .catch(err=>{
+    console.warn('Hand tracking unavailable:', err);
+    $('note').textContent='Hand tracking unavailable — touch mode still works';
+  });
+</script>

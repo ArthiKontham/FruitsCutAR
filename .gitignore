@@ -1,0 +1,10 @@
+node_modules
+dist
+.vite
+.vercel
+.DS_Store
+
+# Local TLS key for the phone-testing server. Never commit or deploy this.
+certs/
+
+.vercel
