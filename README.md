@@ -6,6 +6,10 @@ tracking, or by swiping. 23 fruits, bombs, three modes.
 Everything is in this one folder. There are two ways to run it and they
 share the same files — pick whichever you prefer.
 
+## Preview
+
+![FruitsCutAR](Preview.png)
+
 ## Live Demo
 
 🔗 [FruitsCutAR – Live Website](https://fruitcuts-ar.vercel.app/)
