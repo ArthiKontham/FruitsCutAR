@@ -113,19 +113,43 @@ per mode.
 
 ---
 
-## Layout
+## Project Structure
 
-```
-index.html               the entire game — markup, styles, logic
-vite.config.js           dev on 5291, preview on 5292
-vercel.json              deploy config
-serve.js / serve.py      no-build servers (http 8790, https 8791)
-start-*.bat/.command     launchers for those
-certs/                   self-signed cert for phone testing — git-ignored
-public/
-  sprites/               71 PNGs: 23 fruits x (whole, left, right) + bomb + blast
-  mediapipe/             offline hand-tracking runtime and model
-  thumbnail.png          favicon
+```text
+fruits-cut-ar/
+├── .gitignore
+├── README.md
+├── package.json
+├── package-lock.json
+├── vite.config.js
+├── vercel.json
+├── index.html
+├── serve.js
+├── serve.py
+├── start-windows.bat
+├── start-mac-linux.command
+├── Thumbnail.png
+│
+├── public/
+│   ├── mediapipe/
+│   │   ├── hands.js
+│   │   ├── hands.binarypb
+│   │   ├── hand_landmark_full.tflite
+│   │   ├── hand_landmark_lite.tflite
+│   │   ├── hands_solution_packed_assets.data
+│   │   ├── hands_solution_packed_assets_loader.js
+│   │   ├── hands_solution_simd_wasm_bin.js
+│   │   ├── hands_solution_simd_wasm_bin.wasm
+│   │   ├── hands_solution_simd_wasm_bin.data
+│   │   ├── hands_solution_wasm_bin.js
+│   │   └── hands_solution_wasm_bin.wasm
+│   │
+│   └── sprites/
+│       ├── fruit sprites...
+│       ├── fruit-left sprites...
+│       ├── fruit-right sprites...
+│       ├── bomb.png
+│       └── bomb-blast.png
 ```
 
 `public/` is served from the site root and copied into `dist/` untouched.
