@@ -19,7 +19,6 @@
 <meta name="twitter:image" content="https://fruitcuts-ar.vercel.app/preview.png">
 
 <style>
-  /* Palette sampled directly from the reference screenshots. */
   :root{
     --bg:#2D2D2D;
     --fill:#128D89;         /* button fill, small controls */
@@ -418,17 +417,12 @@ function videoToScreen(nx, ny){
 
 /* ---------- tuning ---------- */
 const GRAVITY=1500;
-const BASE_R = 0.100;   // hitbox radius as a fraction of min(width,height)
-/* sprite() draws at 2*r*FILL wide, so FILL is measured against the hitbox
-   DIAMETER, not the radius. 1.18 leaves a little margin for the ~6%
-   transparent padding baked into each sprite. Raising this makes fruit
-   look bigger without changing how big it is to cut. */
+const BASE_R = 0.100;   
 const FILL = 1.18;
 const HIT = 1.0;        // collision radius as a fraction of r
 const BLADE_LIFE=0.22, HAND_SMOOTH=0.45;
 const FRUIT_POINTS  = 2;   // every fruit sliced
 const BOMB_PENALTY  = 2;   // every bomb sliced
-/* No lives. The score is the health bar: drop below zero and the run ends. */
 
 const state = {
   phase:'menu',          // menu | playing | paused | over
@@ -469,9 +463,6 @@ function checkSlices(blade, minSpeed){
   if(p.length<2) return;
   const a=p[p.length-2], b=p[p.length-1];
   const dx=b.x-a.x, dy=b.y-a.y;
-  // Below the threshold the blade counts as lifted: no cut, and the
-  // single-stroke chain ends. Without this a hand that simply stays on
-  // screen would keep one stroke alive for the whole run.
   if(Math.hypot(dx,dy) < minSpeed){ blade.stroke = 0; return; }
   const cut = Math.atan2(dy,dx);
   for(const o of objects){
@@ -915,13 +906,8 @@ addEventListener('keydown', e=>{
   if(e.key==='Escape'){ playing() ? pause() : resume(); }
   if(e.key===' ' && state.phase==='over'){ e.preventDefault(); startRun(state.mode); }
 });
-// Losing focus mid-run should not cost you the run.
-addEventListener('blur', pause);
 
-/* Leaving the tab releases the camera outright — the indicator light goes
-   out and other apps can use it again. It comes back when you return,
-   unless you had switched it off yourself. Permission is already granted
-   at that point, so there is no second prompt. */
+addEventListener('blur', pause);
 document.addEventListener('visibilitychange', ()=>{
   if(document.hidden){
     pause();
@@ -937,8 +923,6 @@ addEventListener('pagehide', stopCamera);
 $('camBtn').addEventListener('click', ()=>setCamera(!camWanted));
 
 /* ---------- boot ---------- */
-/* The thumbnail is 184x130, far too small to stretch behind a full screen,
-   so the splash is rebuilt at native resolution from the sprite set. */
 function buildSplash(){
   const picks = ['watermelon2','strawberry','lemon','kiwi','tangerine','pear',
                  'apple','mango','blueberry','cherries','pineapple','avocado',
