@@ -1,11 +1,5 @@
 # Fruits Cut AR
 
-Camera-passthrough fruit slicing game. Cut with your hand via webcam hand
-tracking, or by swiping. 23 fruits, bombs, three modes.
-
-Everything is in this one folder. There are two ways to run it and they
-share the same files — pick whichever you prefer.
-
 ## Preview
 
 ![FruitsCutAR](Preview.png)
@@ -13,6 +7,12 @@ share the same files — pick whichever you prefer.
 ## Live Demo
 
 🔗 [FruitsCutAR – Live Website](https://fruitcuts-ar.vercel.app/)
+
+Camera-passthrough fruit slicing game. Cut with your hand via webcam hand
+tracking, or by swiping. 23 fruits, bombs, three modes.
+
+Everything is in this one folder. There are two ways to run it and they
+share the same files — pick whichever you prefer.
 
 ## Run it
 
